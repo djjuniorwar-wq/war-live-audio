@@ -1,0 +1,95 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WAR LIVE AUDIO</title>
+<style>
+body {
+  background:#101820;
+  color:white;
+  font-family:Arial,sans-serif;
+  text-align:center;
+  padding:25px;
+}
+button,input {
+  padding:12px;
+  margin:10px 0;
+  max-width:340px;
+  width:100%;
+  box-sizing:border-box;
+}
+button {background:#f5bf36;border:0;border-radius:8px}
+section {margin:25px auto;max-width:400px}
+audio {width:100%}
+</style>
+</head>
+<body>
+<h1>WAR LIVE AUDIO</h1>
+<p>WAR EMPEROR SOUND</p>
+
+<section>
+<h2>Broadcaster Test</h2>
+<button id="start">Test iRig Audio</button>
+<button id="stop">Stop Test</button>
+<p id="status">Waiting for audio input</p>
+<meter id="level" min="0" max="1" value="0"></meter>
+</section>
+
+<section>
+<h2>Listen Live</h2>
+<input id="streamUrl" placeholder="HTTPS stream URL">
+<button id="load">Load Stream</button>
+<audio id="player" controls></audio>
+</section>
+
+<script>
+let stream, context, analyser, frame;
+
+document.getElementById("start").onclick = async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation:false,
+        noiseSuppression:false,
+        autoGainControl:false
+      }
+    });
+    context = new AudioContext();
+    const source = context.createMediaStreamSource(stream);
+    analyser = context.createAnalyser();
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.fftSize);
+    const meter = document.getElementById("level");
+    function update() {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (const x of data) sum += ((x-128)/128)**2;
+      meter.value = Math.min(1,Math.sqrt(sum/data.length)*4);
+      frame = requestAnimationFrame(update);
+    }
+    update();
+    document.getElementById("status").textContent =
+      "Audio input active";
+  } catch (error) {
+    document.getElementById("status").textContent =
+      "Input unavailable: " + error.message;
+  }
+};
+
+document.getElementById("stop").onclick = () => {
+  cancelAnimationFrame(frame);
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  if(context) context.close();
+  document.getElementById("level").value = 0;
+  document.getElementById("status").textContent = "Stopped";
+};
+
+document.getElementById("load").onclick = () => {
+  document.getElementById("player").src =
+    document.getElementById("streamUrl").value.trim();
+};
+</script>
+</body>
+</html>
