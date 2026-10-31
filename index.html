@@ -57,6 +57,8 @@ document.getElementById("start").onclick = async () => {
       }
     });
     context = new AudioContext();
+    await context.resume();
+    
     const source = context.createMediaStreamSource(stream);
     analyser = context.createAnalyser();
     source.connect(analyser);
