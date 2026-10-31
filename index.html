@@ -6,92 +6,323 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>WAR LIVE AUDIO</title>
 <style>
-body {
-  background:#101820;
-  color:white;
-  font-family:Arial,sans-serif;
-  text-align:center;
-  padding:25px;
-}
-button,input {
-  padding:12px;
-  margin:10px 0;
-  max-width:340px;
-  width:100%;
-  box-sizing:border-box;
-}
-button {background:#f5bf36;border:0;border-radius:8px}
-section {margin:25px auto;max-width:400px}
-audio {width:100%}
+  body {
+    background: #091b17;
+    color: white;
+    font-family: Arial, sans-serif;
+    text-align: center;
+    padding: 20px;
+  }
+  .container {
+    max-width: 500px;
+    margin: auto;
+  }
+  h1 { color: gold; }
+  .panel {
+    background: #15362c;
+    padding: 20px;
+    margin: 20px 0;
+    border-radius: 15px;
+  }
+  button {
+    background: gold;
+    color: black;
+    border: none;
+    padding: 15px;
+    width: 100%;
+    margin: 8px 0;
+    border-radius: 10px;
+    font-size: 17px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .5; }
+  audio, meter { width: 100%; }
+  input {
+    width: 95%;
+    padding: 10px;
+    margin: 10px 0;
+  }
+  #status, #listenerStatus {
+    overflow-wrap: anywhere;
+  }
 </style>
 </head>
+
 <body>
+<div class="container">
+
 <h1>WAR LIVE AUDIO</h1>
 <p>WAR EMPEROR SOUND</p>
+<p>Live DJ Broadcasting System</p>
 
-<section>
-<h2>Broadcaster Test</h2>
-<button id="start">Test iRig Audio</button>
-<button id="stop">Stop Test</button>
-<p id="status">Waiting for audio input</p>
-<meter id="level" min="0" max="1" value="0"></meter>
-</section>
+<div class="panel" id="broadcastPanel">
+  <h2>DJ BROADCASTER</h2>
+  <p>Connect your iRig Stream to your iPhone.</p>
 
-<section>
-<h2>Listen Live</h2>
-<input id="streamUrl" placeholder="HTTPS stream URL">
-<button id="load">Load Stream</button>
-<audio id="player" controls></audio>
-</section>
+  <button id="startBtn">START LIVE AUDIO</button>
+  <button id="stopBtn" disabled>STOP LIVE AUDIO</button>
+
+  <p>Audio Input Level</p>
+  <meter id="audioMeter" min="0" max="1" value="0"></meter>
+
+  <p id="status">Waiting to broadcast</p>
+
+  <input id="shareLink" readonly
+         placeholder="Live link appears here">
+
+  <button id="shareBtn" disabled>
+    SHARE TO WHATSAPP
+  </button>
+</div>
+
+<div class="panel">
+  <h2>LISTEN LIVE</h2>
+  <p>Listen to WAR EMPEROR SOUND live.</p>
+
+  <button id="listenBtn">CONNECT TO LIVE AUDIO</button>
+
+  <audio id="player" controls autoplay playsinline></audio>
+
+  <p id="listenerStatus">Waiting for live broadcast</p>
+</div>
+
+<p>Powered by WAR LIVE AUDIO</p>
+
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 
 <script>
-let stream, context, analyser, frame;
+const $ = id => document.getElementById(id);
 
-document.getElementById("start").onclick = async () => {
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation:false,
-        noiseSuppression:false,
-        autoGainControl:false
-      }
+let peer = null;
+let audioStream = null;
+let audioContext = null;
+let meterAnimation = null;
+let activeCalls = [];
+
+const params = new URLSearchParams(window.location.search);
+const roomId = params.get("room");
+
+if (roomId) {
+  $("broadcastPanel").style.display = "none";
+}
+
+function setStatus(id, message) {
+  $(id).textContent = message;
+}
+
+function waitForPeer(p) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("Connection timed out"));
+    }, 12000);
+
+    p.on("open", id => {
+      clearTimeout(timeout);
+      resolve(id);
     });
-    context = new AudioContext();
-    await context.resume();
-    
-    const source = context.createMediaStreamSource(stream);
-    analyser = context.createAnalyser();
-    source.connect(analyser);
-    const data = new Uint8Array(analyser.fftSize);
-    const meter = document.getElementById("level");
-    function update() {
-      analyser.getByteTimeDomainData(data);
-      let sum = 0;
-      for (const x of data) sum += ((x-128)/128)**2;
-      meter.value = Math.min(1,Math.sqrt(sum/data.length)*4);
-      frame = requestAnimationFrame(update);
+
+    p.on("error", error => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+}
+
+async function startBroadcast() {
+  $("startBtn").disabled = true;
+
+  try {
+    if (!window.isSecureContext) {
+      throw new Error("HTTPS website required");
     }
-    update();
-    document.getElementById("status").textContent =
-      "Audio input active";
+
+    if (!window.Peer) {
+      throw new Error("Audio connection library unavailable");
+    }
+
+    audioStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      },
+      video: false
+    });
+
+    peer = new Peer();
+
+    peer.on("call", call => {
+      call.answer(audioStream);
+      activeCalls.push(call);
+
+      setStatus("status", "LIVE - Listener connected");
+
+      call.on("close", () => {
+        activeCalls = activeCalls.filter(c => c !== call);
+      });
+    });
+
+    const id = await waitForPeer(peer);
+
+    const link = new URL(window.location.href);
+    link.searchParams.set("room", id);
+
+    $("shareLink").value = link.href;
+    $("shareBtn").disabled = false;
+    $("stopBtn").disabled = false;
+
+    setStatus("status", "ON AIR - Waiting for listeners");
+
+    audioContext = new AudioContext();
+
+    const source = audioContext.createMediaStreamSource(audioStream);
+    const analyser = audioContext.createAnalyser();
+
+    source.connect(analyser);
+
+    const data = new Uint8Array(analyser.fftSize);
+
+    function updateMeter() {
+      analyser.getByteTimeDomainData(data);
+
+      let sum = 0;
+
+      for (const value of data) {
+        const sample = (value - 128) / 128;
+        sum += sample * sample;
+      }
+
+      $("audioMeter").value = Math.min(
+        1,
+        Math.sqrt(sum / data.length) * 4
+      );
+
+      meterAnimation = requestAnimationFrame(updateMeter);
+    }
+
+    updateMeter();
+
   } catch (error) {
-    document.getElementById("status").textContent =
-      "Input unavailable: " + error.message;
+    setStatus("status", "Error: " + error.message);
+    stopBroadcast(false);
   }
-};
+}
 
-document.getElementById("stop").onclick = () => {
-  cancelAnimationFrame(frame);
-  if(stream) stream.getTracks().forEach(t=>t.stop());
-  if(context) context.close();
-  document.getElementById("level").value = 0;
-  document.getElementById("status").textContent = "Stopped";
-};
+function stopBroadcast(showMessage = true) {
+  if (meterAnimation) cancelAnimationFrame(meterAnimation);
 
-document.getElementById("load").onclick = () => {
-  document.getElementById("player").src =
-    document.getElementById("streamUrl").value.trim();
-};
+  activeCalls.forEach(call => call.close());
+  activeCalls = [];
+
+  if (audioStream) {
+    audioStream.getTracks().forEach(track => track.stop());
+  }
+
+  if (audioContext) audioContext.close().catch(() => {});
+
+  if (peer) peer.destroy();
+
+  peer = null;
+  audioStream = null;
+  audioContext = null;
+
+  $("audioMeter").value = 0;
+  $("startBtn").disabled = false;
+  $("stopBtn").disabled = true;
+  $("shareBtn").disabled = true;
+  $("shareLink").value = "";
+
+  if (showMessage) {
+    setStatus("status", "Broadcast stopped");
+  }
+}
+
+async function connectListener() {
+  if (!roomId) {
+    setStatus(
+      "listenerStatus",
+      "Open the live link shared by the DJ."
+    );
+    return;
+  }
+
+  if (!window.Peer) {
+    setStatus("listenerStatus", "Connection library unavailable");
+    return;
+  }
+
+  $("listenBtn").disabled = true;
+
+  const listener = new Peer();
+
+  listener.on("open", () => {
+    const call = listener.call(roomId, new MediaStream());
+
+    if (!call) {
+      setStatus("listenerStatus", "Unable to connect");
+      $("listenBtn").disabled = false;
+      return;
+    }
+
+    call.on("stream", remoteStream => {
+      const player = $("player");
+      player.srcObject = remoteStream;
+
+      player.play()
+        .then(() => {
+          setStatus("listenerStatus", "Playing live audio");
+        })
+        .catch(() => {
+          setStatus(
+            "listenerStatus",
+            "Connected. Tap Play on the audio player."
+          );
+        });
+    });
+
+    call.on("close", () => {
+      setStatus("listenerStatus", "Broadcast disconnected");
+      $("listenBtn").disabled = false;
+    });
+
+    call.on("error", error => {
+      setStatus("listenerStatus", error.message);
+      $("listenBtn").disabled = false;
+    });
+
+    setStatus("listenerStatus", "Connecting...");
+  });
+
+  listener.on("error", error => {
+    setStatus("listenerStatus", error.message);
+    $("listenBtn").disabled = false;
+  });
+}
+
+function shareToWhatsApp() {
+  const link = $("shareLink").value;
+
+  if (!link) return;
+
+  const message = "Listen LIVE to WAR LIVE AUDIO: " + link;
+
+  window.location.href =
+    "https://wa.me/?text=" + encodeURIComponent(message);
+}
+
+$("startBtn").addEventListener("click", startBroadcast);
+
+$("stopBtn").addEventListener("click", () => {
+  stopBroadcast();
+});
+
+$("listenBtn").addEventListener("click", connectListener);
+
+$("shareBtn").addEventListener("click", shareToWhatsApp);
 </script>
+
 </body>
 </html>
